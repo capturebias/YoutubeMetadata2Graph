@@ -6,6 +6,7 @@ from requests import exceptions
 from sys import stderr, stdin, stdout
 
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 
 API_SERVICE_NAME = "youtube"
@@ -31,14 +32,16 @@ def request_channel_data(service, channel_id):
     # https://developers.google.com/youtube/v3/docs/channels
     #
     # - The snippet object contains basic details about the channel, such as its
-    #   title, description, and thumbnail images.
+    #   title, description, and thumbnail images. (quota -= 2)
     # - The contentDetails object encapsulates information about the channel's
-    #   content.
-    # - The statistics object encapsulates statistics for the channel.
+    #   content. (quota -= 2)
+    # - The statistics object encapsulates statistics for the channel. (quota -= 2)
     # - The topicDetails object encapsulates information about topics associated
-    #   with the channel.
+    #   with the channel. (quota -= 2)
     # - The brandingSettings object encapsulates information about the branding
-    #   of the channel.
+    #   of the channel. (quota -= 2)
+    #
+    # quota needed per request: 10 + 1 (initial costs) = 11
     request = service.channels().list(
         part="snippet,contentDetails,statistics,topicDetails,brandingSettings",
         id=channel_id
@@ -50,13 +53,15 @@ def request_video_data(service, video_id):
     # https://developers.google.com/youtube/v3/docs/videos
     #
     # - The snippet object contains basic details about the video, such as its
-    #   title, description, and category.
+    #   title, description, and category. (quota -= 2)
     # - The contentDetails object contains information about the video content,
     #   including the length of the video and an indication of whether captions
-    #   are available for the video.
-    # - The statistics object contains statistics about the video.
+    #   are available for the video. (quota -= 2)
+    # - The statistics object contains statistics about the video. (quota -= 2)
     # - The topicDetails object encapsulates information about topics
-    #   associated with the video.
+    #   associated with the video. (quota -= 2)
+    #
+    # quota needed per request: 8 + 1 (initial costs) = 9
     request = service.videos().list(
         part="snippet,contentDetails,statistics,topicDetails",
         id=video_id
@@ -67,11 +72,14 @@ def request_video_data(service, video_id):
 def request_data(request):
     try:
         response = request.execute()
+    except HttpError as e:
+        stderr.write("API HTTP Error: %s\n" % (e))
+        return (dict(), False, True)
     except exceptions.RequestException as e:
         stderr.write("Request Error: %s\n" % (e))
-        return (dict(), False)
+        return (dict(), False, False)
 
-    return (response['items'][0], True) # strip request meta data
+    return (response['items'][0], True, False) # strip request meta data
 
 def main():
     developer_key = read_developer_key(DEVELOPER_KEY_FILE)
@@ -79,7 +87,10 @@ def main():
 
     data = dict()
     for video_id in video(stdin):
-        video_data, success = request_video_data(service, video_id)
+        video_data, success, api_error = request_video_data(service, video_id)
+        if api_error:
+            stderr.write("Failed retrieving video %s\n" % (video_id))
+            break
         if not success:
             stderr.write("Failed retrieving video %s\n" % (video_id))
             continue
@@ -89,7 +100,12 @@ def main():
         # extract channel ID
         channel_id = video_data['snippet']['channelId']
         if channel_id not in data.keys():
-            channel_data, success = request_channel_data(service, channel_id)
+            channel_data, success, api_error = request_channel_data(service, channel_id)
+            if api_error:
+                stderr.write("Failed retrieving video %s\n" % (video_id))
+                stderr.write("Failed retrieving channel %s\n" % (channel_id))
+                break
+
             if not success:
                 stderr.write("Failed retrieving channel %s\n" % (channel_id))
             else:
