@@ -4,6 +4,7 @@ from datetime import datetime
 from json import dump
 from requests import exceptions
 from sys import stderr, stdin, stdout
+from time import sleep
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -12,6 +13,13 @@ from googleapiclient.errors import HttpError
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
 DEVELOPER_KEY_FILE = "./developer_key"
+
+QUOTA_DEFAULT = 10000
+QUOTA_RESET_TIME = 24*60*60 + 600  # in seconds, plus some more time to be sure
+QUOTA_MIN = 12  # costs of highest request
+
+TEMPFILE = "./.TEMPFILE.json"
+
 
 def video(video_identifiers):
     for video_ids in video_identifiers:
@@ -42,12 +50,14 @@ def request_channel_data(service, channel_id):
     #   of the channel. (quota -= 2)
     #
     # quota needed per request: 10 + 1 (initial costs) = 11
+    cost = 12 # minimum+1 to be sure
+
     request = service.channels().list(
         part="snippet,contentDetails,statistics,topicDetails,brandingSettings",
         id=channel_id
     )
 
-    return request_data(request)
+    return (request_data(request), cost)
 
 def request_video_data(service, video_id):
     # https://developers.google.com/youtube/v3/docs/videos
@@ -62,54 +72,88 @@ def request_video_data(service, video_id):
     #   associated with the video. (quota -= 2)
     #
     # quota needed per request: 8 + 1 (initial costs) = 9
+    cost = 10 # minimum+1 to be sure
+
     request = service.videos().list(
         part="snippet,contentDetails,statistics,topicDetails",
         id=video_id
     )
 
-    return request_data(request)
+    return (request_data(request), cost)
 
 def request_data(request):
     try:
         response = request.execute()
     except HttpError as e:
         stderr.write("API HTTP Error: %s\n" % (e))
-        return (dict(), False, True)
+        return (dict(), False)
     except exceptions.RequestException as e:
         stderr.write("Request Error: %s\n" % (e))
-        return (dict(), False, False)
+        return (dict(), False)
 
-    return (response['items'][0], True, False) # strip request meta data
+    return (response['items'][0], True) # strip request meta data
 
-def main():
+def save_progress(data):
+    with open(TEMPFILE, 'w') as f:
+        dump(data, f, indent=4)
+
+def main(quota=False):
     developer_key = read_developer_key(DEVELOPER_KEY_FILE)
     service = build_service_object(API_SERVICE_NAME, API_VERSION, developer_key)
 
+    costs = 0
     data = dict()
     for video_id in video(stdin):
-        video_data, success, api_error = request_video_data(service, video_id)
-        if api_error:
-            stderr.write("Failed retrieving video %s\n" % (video_id))
-            break
+        if quota and costs >= QUOTA_DEFAULT - QUOTA_MIN:
+            save_progress(data)
+            costs = 0
+            sleep(QUOTA_RESET_TIME)
+
+        i = 0
+        (video_data, success), cost = request_video_data(service, video_id)
+        while not success:
+            if i < 5:
+                sleep(60)
+            elif i > 5:
+                stderr.write("Failed retrieving video %s\n" % (video_id))
+                break
+            else:
+                sleep(600)
+
+            (video_data, success), cost = request_video_data(service, video_id)
+            i += 1
+
         if not success:
-            stderr.write("Failed retrieving video %s\n" % (video_id))
             continue
 
         video_data['retrieved_on'] = datetime.today().strftime("%Y-%m-%dT%H:%M:%S")
+        costs += cost
 
         # extract channel ID
         channel_id = video_data['snippet']['channelId']
         if channel_id not in data.keys():
-            channel_data, success, api_error = request_channel_data(service, channel_id)
-            if api_error:
-                stderr.write("Failed retrieving video %s\n" % (video_id))
-                stderr.write("Failed retrieving channel %s\n" % (channel_id))
-                break
+            if quota and costs >= QUOTA_DEFAULT - QUOTA_MIN:
+                save_progress(data)
+                costs = 0
+                sleep(QUOTA_RESET_TIME)
 
-            if not success:
-                stderr.write("Failed retrieving channel %s\n" % (channel_id))
-            else:
+            i = 0
+            (channel_data, success), cost = request_channel_data(service, channel_id)
+            while not success:
+                if i < 5:
+                    sleep(60)
+                elif i > 5:
+                    stderr.write("Failed retrieving channel %s\n" % (channel_id))
+                    break
+                else:
+                    sleep(600)
+
+                (channel_data, success), cost = request_channel_data(service, channel_id)
+                i += 1
+
+            if success:
                 channel_data['retrieved_on'] = datetime.today().strftime("%Y-%m-%dT%H:%M:%S")
+                costs += cost
 
             channel_data['videos'] = list()
 
@@ -122,6 +166,6 @@ def main():
     return data
 
 if __name__ == "__main__":
-    data = main()
+    data = main(quota=True)
 
     dump(data, stdout, indent=4)
