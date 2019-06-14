@@ -5,7 +5,7 @@ from json import load
 from sys import stdin, stdout, stderr
 
 from rdflib import BNode, Literal, Graph, URIRef
-from rdflib.namespace import DCTERMS, FOAF, Namespace, RDF, RDFS, VOID, XSD
+from rdflib.namespace import DCTERMS, FOAF, Namespace, OWL, RDF, RDFS, VOID, XSD
 
 
 GRAPH_LABEL = "YouTube Meta-Data Graph"
@@ -17,6 +17,9 @@ GRAPH_NAMESPACE = "http://example.org#"
 GRAPH_SEEALSO = "https://capturebias.wordpress.com"
 GRAPH_SOURCE_NAME = "YouTube"
 GRAPH_SOURCE_HREF = "https://youtube.com"
+
+SIOC = Namespace('http://rdfs.org/sioc/ns#')
+
 
 def init_entity(base_ns):
     return URIRef(base_ns+BNode().title())
@@ -48,10 +51,6 @@ def dict_to_graph(base_ns, g, data_dict):
     if len(channels) <= 0:
         stderr.write("No channel data found\n")
 
-    # define properties
-    p_channel_video = URIRef('...')
-    p_channel_video_inv = URIRef('...')
-
     for channel in channels:
         channel_data = data_dict[channel]
         channel_uri = add_channel(base_ns, g, channel_data)
@@ -63,16 +62,56 @@ def dict_to_graph(base_ns, g, data_dict):
             video_uri = add_video(base_ns, g, video_data)
 
             # link channel to videos
-            #g.add(channel_uri, p_channel_video, video_uri)
-            #g.add(video_uri, p_channel_video_inv, channel_uri)
+            g.add(channel_uri, SIOC.creator_of, video_uri)
+            g.add(video_uri, SIOC.has_creator, channel_uri)
 
     return g
 
 def add_channel(base_ns, g, channel_data):
-    pass
+    channel_uri = URIRef(base_ns+channel_data['id'])
+    g.add((channel_uri, RDF.type, SIOC.OnlineAccount))
+
+    if 'snippet' in channel_data.keys():
+        pass
+
+    if 'contentDetails' in channel_data.keys():
+        pass
+
+    if 'topicDetails' in channel_data.keys():
+        pass
+
+    if 'brandingSettings' in channel_data.keys():
+        pass
+
+    if 'statistics' in channel_data.keys():
+        pass
+
+    return channel_uri
+
+def add_channel_snippet(base_ns, g, channel_uri, snippet_data):
+    for attr, value in snippet_data.items():
+        if attr == 'title':
+            g.add((channel_uri, DCTERMS.title,
+                   Literal(value, lang='en')))
+
+        if attr == 'description':
+            g.add((channel_uri, DCTERMS.description,
+                   Literal(value, lang='en')))
+
+        if attr == 'thumbnails' and 'default' in value.keys():
+            if 'url' in value['default']:
+                g.add((channel_uri, SIOC.avatar,
+                       Literal(value, datatype=XSD.anyURI)))
+
+        if attr == 'country':
+            pass
 
 def add_video(base_ns, g, video_data):
-    pass
+    video_uri = URIRef(base_ns+video_data['id'])
+    g.add((video_uri, RDF.type, base_ns.Post))
+
+
+    return video_uri
 
 def main(data_dict):
     base_ns = Namespace(GRAPH_NAMESPACE)
