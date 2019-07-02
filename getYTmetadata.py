@@ -91,6 +91,10 @@ def request_data(request):
         stderr.write("Request Error: %s\n" % (e))
         return (dict(), False)
 
+    if 'items' not in response.keys() or len(response['items']) <= 0:
+        stderr.write("Warning: request returned no items"))
+        return (dict(), False)
+
     return (response['items'][0], True) # strip request meta data
 
 def save_progress(data):
