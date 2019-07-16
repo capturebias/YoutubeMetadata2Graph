@@ -212,8 +212,8 @@ def add_video_snippet(g, video_uri, data, categories_map):
     add_snippet(g, video_uri, data)
 
     for attr, value in data.items():
-        if attr == 'thumbnails' and 'standard' in value.keys():
-            add_thumbnail(g, video_uri, value['standard'])
+        if attr == 'thumbnails' and 'medium' in value.keys():
+            add_thumbnail(g, video_uri, value['medium'])
             continue
 
         if attr == 'tags':
@@ -254,8 +254,8 @@ def add_channel_snippet(g, channel_uri, data, geonames_map):
     add_snippet(g, channel_uri, data)
 
     for attr, value in data.items():
-        if attr == 'thumbnails' and 'high' in value.keys():
-            add_thumbnail(g, channel_uri, value['high'])
+        if attr == 'thumbnails' and 'medium' in value.keys():
+            add_thumbnail(g, channel_uri, value['medium'])
             continue
 
         if attr == 'country':
